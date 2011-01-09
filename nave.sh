@@ -104,15 +104,24 @@ nave_fetch () {
   fi
 
   local src="$NAVE_SRC/$version"
-  remove_dir "$src"
-  ensure_dir "$src"
-  local url="http://nodejs.org/dist/node-v$version.tar.gz"
-  local url2="http://nodejs.org/dist/node-$version.tar.gz"
-  curl -# -L "$url" \
-    | $tar xzf - -C "$src" --strip-components=1 \
-    || curl -# -L "$url2" \
+  if [ $version == "HEAD" ]; then
+    local url="https://github.com/ry/node.git";
+    if ! [ -d "$src" ]; then
+      cd -- "$NAVE_SRC"
+      git clone "$url" "$version"
+      cd -
+    fi
+  else
+    remove_dir "$src"
+    ensure_dir "$src"
+    local url="http://nodejs.org/dist/node-v$version.tar.gz"
+    local url2="http://nodejs.org/dist/node-$version.tar.gz"
+    curl -# -L "$url" \
       | $tar xzf - -C "$src" --strip-components=1 \
-      || fail "Couldn't fetch $version"
+      || curl -# -L "$url2" \
+        | $tar xzf - -C "$src" --strip-components=1 \
+        || fail "Couldn't fetch $version"
+  fi
   return 0
 }
 
@@ -146,6 +155,11 @@ nave_usemain () {
 
 nave_install () {
   local version=$(ver "$1")
+  if [ "$version" == "HEAD" ] && ! git_installed; then
+      echo "HEAD version can not be installed without git." >&2
+      echo "Install git first, and then try again." >&2
+      return 1
+  fi
   if nave_installed "$version"; then
     echo "Already installed: $version" >&2
     return 0
@@ -239,7 +253,20 @@ nave_has () {
 }
 nave_installed () {
   local version=$(ver "$1")
-  [ -d "$NAVE_ROOT/$version/bin" ] || return 1
+  if [ "$version" == "HEAD" ]; then
+    local src="$NAVE_SRC/$version"
+    cd "$src"
+    local ret=`git pull`
+    cd -
+    [ "$ret" = "Already up-to-date." -a -d "$NAVE_ROOT/$version/bin" ] || return 1
+  else
+    [ -d "$NAVE_ROOT/$version/bin" ] || return 1
+  fi
+}
+git_installed () {
+  git=`which git 2>&1`
+  ret=$?
+  [ $ret -eq 0 ] && [ -x $git ] || return 1
 }
 
 nave_use () {
@@ -375,6 +402,8 @@ Commands:
   latest               Show the most recent dist version
   help                 Output help information
 
+
+<version> can be the string "HEAD" to get the HEAD of master branch.
 <version> can be the string "latest" to get the latest distribution.
 <version> can be the string "stable" to get the latest stable version.
 
